@@ -7,9 +7,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
     <link rel="manifest" href="manifest.json">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-192.jpg">
     <meta name="theme-color" content="#000000">
 </head>
 
@@ -20,7 +20,7 @@
     <h2>GAME PAUSED</h2>
     
        <button id="resume">Resume</button>
-        <button id="inPlayRestart">Restart</button>
+        <button id="pauseRestartBtn">Restart</button>
         <details>
             <summary>Sound</summary>
             <button id="soundToggle" onclick="unmute()">OFF</button>
@@ -32,7 +32,7 @@
          <details><summary>HighScore</summary>
          <ol class="content">
              <li id="highscore"></li>
-             <button id="clearHighscoreBtn">Clear Highscore</button>
+             <button id="resetHighScoreBtn">Clear Highscore</button>
          </ol> </details>
 
         <details><summary>Instruction</summary>

@@ -2,6 +2,7 @@ const CACHE_NAME = 'bricks-v1';
 const ASSETS = [
   '/',
   '/index.html',
+  '/logo.html',
   '/style.css',
   '/script.js',
   '/manifest.json',

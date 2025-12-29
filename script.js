@@ -1,20 +1,11 @@
-
 let lastTime = 0;
 let dropInterval = 500; // how fast piece drops (ms)
 let isPaused = false;
 let gameOver = false;
-let gameSeconds = 0;
-let gameClockInterval = null;
+let lastCheckedScore = 0;
 let leftFastInterval = null;
 let rightFastInterval = null;
 let dropFastInterval = null; // will hold interval id
-let animationId = null;
-let isNewHighscore = false;
-let bestHighscore = null;
-let highscoreAnnounced = false;
-
-
-
 
 // Get canvas & context
 const canvas = document.getElementById('gameCanvas');
@@ -27,7 +18,7 @@ if (!canvas || !ctx) {
 
 // Game constants
 const COLS = 26;
-const ROWS = 35;
+const ROWS = 37;
 const BLOCK_SIZE = 15;
 
 // Game state
@@ -208,7 +199,7 @@ function moveDown() {
 function update(time=0) {
   if (gameOver) {
     console.log('🛑 Game stopped.');
-    return; // stop the loop
+    return; // stop the loop, do not schedule another frame
   }
 
   if (!isPaused) {
@@ -217,18 +208,8 @@ function update(time=0) {
       moveDown();
       lastTime = time;
     }
-    
-  if (WORKER_SPAWN_TIMES.includes(gameSeconds)) {
-  spawnWorker();
-  // To prevent multiple spawns in the same second, remove that time from array
-  const index = WORKER_SPAWN_TIMES.indexOf(gameSeconds);
-  if (index > -1) WORKER_SPAWN_TIMES.splice(index, 1); // removes it
-}
-
-
     // Update workers positions
-    updateWorkers(); 
-    
+    updateWorkers();
     // Check collision with workers after moveDown and update workers position
     if (currentPiece && pieceCollidesWithWorkers(currentPiece)) {
       gameOver = true;
@@ -237,13 +218,11 @@ function update(time=0) {
       console.log('Game Over - Hit construction worker!');
       return;
     }
-    
     draw();
   } else {
     draw(); // optional: draw paused state
   }
-
- animationId = requestAnimationFrame(update);
+  window._rafId = requestAnimationFrame(update);
 }
 
 
@@ -295,7 +274,7 @@ const WORKER_SPEED = 0.8; // pixels per frame (adjust speed as you want)
 
 // Array of scheduled spawn times in seconds
 const WORKER_SPAWN_TIMES = [5, 40, 80, 95, 140, 185, 260, 268, 380, 390, 402, 455, 489, 520, 550, 570, 670, 680, 725, 780, 883, 959, 1120, 1322, 1340, 1470, 1590, 1820, 422, 426, 480, 490, 530, 550, 590, 620, 623, 623, 635, 1940, 2170, 2377, 2586, 2800, 2850, 3300, 3660, 3900, 4050, 4300, 4720, 5122, 5623, 6140, 6442, 6914, 7550];
-let ORIGINAL_WORKER_SPAWN_TIME = [...WORKER_SPAWN_TIMES];
+
 const workerSpawnTimes = WORKER_SPAWN_TIMES.slice().sort((a, b) => a - b);
 
 let spawnIndex = 0;
@@ -303,24 +282,23 @@ let workers = [];
 let workerImg = new Image();
 workerImg.src = 'images/worker.png';
 
-function checkSpawnWorker(gameTime) {
-  if (spawnIndex >= workerSpawnTimes.length) return;
 
-  if (gameTime >= workerSpawnTimes[spawnIndex]) {
-    spawnWorker();
+function checkSpawnWorker(elapsedSeconds) {
+  if (spawnIndex >= workerSpawnTimes.length) return; // no more spawns
+
+  if (elapsedSeconds >= workerSpawnTimes[spawnIndex]) {
+    spawnWorker();  // your function to create/move the worker
     spawnIndex++;
   }
 }
 
-let workerSpawnQueue = [];
 
 // Spawn a worker at random position within canvas bounds
 function spawnWorker() {
-  const y = Math.random() * (canvas.height - WORKER_SIZE);
-
+  const y = Math.random() * (canvas.height - WORKER_SIZE); // random vertical position
   workers.push({
-    x: -WORKER_SIZE,
-    y: Math.max(0, Math.min(y, canvas.height - WORKER_SIZE)),
+    x: -WORKER_SIZE, // start off left side
+    y,
     width: WORKER_SIZE,
     height: WORKER_SIZE,
     speed: WORKER_SPEED
@@ -504,42 +482,23 @@ let elapsedTime = 0;
 let timerInterval = null;
 
 // Start the timer
-
 function startTimer() {
-  clearInterval(timerInterval);
   startTime = Date.now() - elapsedTime;
-
-  timerInterval = setInterval(() => {
-    if (isPaused || gameOver) return;
-
-    elapsedTime = Date.now() - startTime;
-    gameSeconds = Math.floor(elapsedTime / 1000);
-
-    document.getElementById('timer').textContent =
-      String(gameSeconds).padStart(2, '0');
-
-    // 🔥 ALL time-based logic lives here
-    updateLevel(gameSeconds);
-    checkSpawnWorker(gameSeconds);
-
-  }, 1000);
+  timerInterval = setInterval(updateTimer, 1000);
 }
 
-
-
-//Pause timer
+// Pause the timer
 function pauseTimer() {
   clearInterval(timerInterval);
+  elapsedTime = Date.now() - startTime;
   isPaused = true;
 }
 
-
 // Resume timer
 function resumeTimer() {
+  startTimer();
   isPaused = false;
-  startTimer(); // continues from where it paused
 }
-
 
 // Update timer display every second
 function updateTimer() {
@@ -563,6 +522,7 @@ const togglePause = () => {
     playPauseSound();
     menuSoundAudio.play();
     stopSoundLoop();
+    stopGameSeconds();
     // clear all fast intervals
     clearInterval(leftFastInterval); leftFastInterval = null;
     clearInterval(rightFastInterval); rightFastInterval = null;
@@ -570,6 +530,7 @@ const togglePause = () => {
 
     document.getElementById('pause').style.display = "none";
     document.getElementById('pauseOverlay').classList.toggle('active');
+    
   } else {
     resumeTimer();
     menuSoundAudio.pause(); document.getElementById('pauseOverlay').classList.remove('active');
@@ -583,7 +544,7 @@ document.getElementById('pause').addEventListener('click', togglePause);
 // Space bar event
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
-    
+    e.preventDefault(); // stop page scroll
     togglePause();
   }
 });
@@ -615,70 +576,41 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-
-function resetGameState() {
-  board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
-  currentPiece = newPiece();
-  workers = [];
-  spawnIndex = 0;
-  gameSeconds = 0;
-  lastTime = 0;
-  isPaused = false;
-  gameOver = false;
-  dropInterval = 500;
-
-  document.getElementById('score').textContent = "00";
-  document.getElementById('level').textContent = "Beginner";
-}
-
   
   
 
 //Score
+
 function score() {
-    let scoreEl = document.getElementById('score');
-    let pop = document.getElementById('pops');
-    let currentScore = parseInt(scoreEl.textContent) || 0;
-    let cleared = clearLines(); // now returns number
+  let scoreEl = document.getElementById('score');
+  let pop = document.getElementById('pops');
+  let currentScore = parseInt(scoreEl.textContent) || 0;
+  let cleared = clearLines();
+  if (cleared > 0) {
+    let added = 100 * cleared;
+    currentScore += added;
+    playClearedSound();
+    if (pop) pop.classList.toggle('active');
+    showPopText('+' + added + '🔥');
+  } else {
+    currentScore += 10;
+    showPopText('+10');
+  }
+  scoreEl.textContent = currentScore;
 
-    if (cleared > 0) {
-        let added = 100 * cleared;
-        currentScore += added;
-        playClearedSound();
-        if (pop) pop.classList.toggle('active');
-        showPopText('+' + added + '🔥');  // show floating animation
-    } else {
-        currentScore += 10;
-        showPopText('+10');
-    }
-
-    scoreEl.textContent = currentScore;
-
-    // 🔥 IMMEDIATE HIGHSCORE CHECK
-    if (!bestHighscore || currentScore > bestHighscore.score) {
-        if (!highscoreAnnounced) {
-            highscoreAnnounced = true;
-            showLevelUpPopup("🏆 NEW HIGHSCORE!");
-            playNewLevelSound();
-        }
-        // update in-memory highscore immediately
-        bestHighscore = { score: currentScore, time: gameSeconds };
-    }
+  // 🔥 LIVE highscore check and popup
+  if (currentScore > highScore && !isNewHighscore) {
+    isNewHighscore = true;
+    highScore = currentScore;
+    highScoreTime = getElapsedTimeInSeconds();
+    localStorage.setItem(
+      'highscore',
+      JSON.stringify({ score: highScore, time: highScoreTime })
+    );
+    updateHighScoreUI();
+    showLevelUpPopup("New Highscore 🍾🏆");
+  }
 }
-
-
-// Clear highscore
-function clearHighscore() {
-  localStorage.removeItem('highscore'); // remove saved highscore
-  bestHighscore = null;                 // reset in-memory record
-  highscoreAnnounced = false;           // reset popup flag
-  // Optionally update UI
-  const highscoreEl = document.getElementById('highscore');
-  if (highscoreEl) highscoreEl.textContent = "00";
-  console.log('🗑 Highscore cleared.');
-}
-document.getElementById('clearHighscoreBtn').addEventListener('click', clearHighscore);
-
 
 
 //Pop Up
@@ -696,52 +628,35 @@ function showPopText(text) {
   });
 }
 
-//== == HIGHSCORE =====//
+//HIGHSCORE
 function checkHighscore(finalScore, timeTaken) {
-  const saved = localStorage.getItem('highscore');
+  let saved = localStorage.getItem('highscore');
   let best = saved ? JSON.parse(saved) : null;
-  
-  isNewHighscore = false; // reset every game over
+console.log("Old highscore:", JSON.stringify(highscore));
 
-  if (
-    !best ||
-    finalScore > best.score ||
-    (finalScore === best.score && timeTaken < best.time)
-  ) {
-    localStorage.setItem(
-      'highscore',
-      JSON.stringify({ score: finalScore, time: timeTaken })
-    );
-    console.log('🏆 New Highscore:', finalScore, timeTaken);
+  if (!best || finalScore > best.score) {
+    // New highscore
+    localStorage.setItem('highscore', JSON.stringify({ score: finalScore, time: timeTaken }));
+    console.log('🎉 New highscore saved:', finalScore, 'Time:', timeTaken);
+  } else if (finalScore === best.score && timeTaken < best.time) {
+    // Same score, faster time
+    localStorage.setItem('highscore', JSON.stringify({ score: finalScore, time: timeTaken }));
+    console.log('⚡ Faster time saved:', finalScore, 'Time:', timeTaken);
+  } else {
+    console.log('No new highscore.');
   }
 }
 
-//== == LOAD HIGHSCORE == ==//
-function loadHighscore() {
-  const saved = localStorage.getItem('highscore');
-  bestHighscore = saved ? JSON.parse(saved) : null;
-  highscoreAnnounced = false;
-  if (bestHighscore) {
-    return `Best: ${bestHighscore.score} (${bestHighscore.time}s)`;
-  }
-  return "Best: 0";
-}
-
-let menuHighScore = document.getElementById('menuHighscore');
-if (menuHighScore) {
-  menuHighScore.textContent = loadHighscore();
-}
 
 
 function showHighscore() {
-  const el = document.getElementById('highscore');
-  if (!el) return;
-
-  const saved = localStorage.getItem('highscore');
-  if (!saved) return;
-
-  const best = JSON.parse(saved);
-  el.textContent = loadHighscore();
+  let saved = localStorage.getItem('highscore');
+  if (saved) {
+    let best = JSON.parse(saved);
+    console.log('🏆 Highscore:', best.score, 'Time:', best.time, 'secs');
+   
+     document.getElementById('highscore').textContent = best.score;
+  }
 }
 
 
@@ -761,9 +676,10 @@ function enableAllButtons() {
 }
 
 //Level Update
-let currentLevel = "";
 
+let currentLevel = "";
 function updateLevel(timeTaken) {
+  
   let newLevel = "Beginner";
 
   if (timeTaken > 5250) {
@@ -781,86 +697,83 @@ function updateLevel(timeTaken) {
   } else if (timeTaken > 2300) {
     newLevel = "Medalist 🏅";
     dropInterval = 300;
-  } else if (timeTaken > 10) {
+  }else if (timeTaken > 1020) {
     newLevel = "Expert";
     dropInterval = 350;
   }
-
-  // Update only if level changes
-  if (newLevel !== currentLevel) {
+  
+  if (newLevel !== currentLevel && timeTaken > 120) {
     currentLevel = newLevel;
     document.getElementById('level').textContent = newLevel;
-    playNewLevelSound();
-    showLevelUpPopup(`NEW LEVEL: ${newLevel}`);
-  }
+    playNewLevelSound();    
+    showLevelUpPopup("NEW LEVEL⭐"); // Trigger animatio
+    
+ }
+ }
+
+// this timer tracking seconds
+let secondsElapsed = 0;
+
+let gameSecondInterval = null;
+
+function startGameSeconds() {
+  clearInterval(gameSecondInterval);
+  gameSecondInterval = setInterval(() => {
+    if (!isPaused && !gameOver) {
+      secondsElapsed++;
+      updateLevel(secondsElapsed);
+      checkSpawnWorker(secondsElapsed);
+    }
+  }, 1000);
 }
 
-
-
+function stopGameSeconds() {
+  clearInterval(gameSecondInterval);
+}
 
 //NEW Level Pop Up
-let levelPopupTimeout = null;
-
 function showLevelUpPopup(message = "GO🔥") {
   const popup = document.getElementById('levelUpPopup');
-  if (!popup) return;
-
   popup.textContent = message;
+
+  popup.classList.remove('active'); // reset animation if it's already showing
+  void popup.offsetWidth; // trigger reflow
+
   popup.classList.add('active');
 
-  clearTimeout(levelPopupTimeout);
-  levelPopupTimeout = setTimeout(() => {
+  setTimeout(() => {
     popup.classList.remove('active');
-  }, 2000);
+  }, 2000); // Hide after 2 seconds
 }
-
 
 
   
+
 
 
 
 function gameOverHandler() {
   gameOver = true;
   disableAllButtons();
-  clearInterval(timerInterval);
-  workers.length = 0;
-  draw();
+  stopGameSeconds();
+  clearInterval(timerInterval);  // stop timer
+  // Stop all held button intervals immediately
+  clearInterval(leftFastInterval); leftFastInterval = null;
+  clearInterval(rightFastInterval); rightFastInterval = null;
+  clearInterval(dropFastInterval); dropFastInterval = null;
   let finalScore = parseInt(document.getElementById('score').textContent) || 0;
-  let timeTaken = gameSeconds;
-
+  let timeTaken = getElapsedTimeInSeconds();
   checkHighscore(finalScore, timeTaken);
+  checkAndUpdateHighScore(finalScore, timeTaken);
 
-  if (isNewHighscore) {
-    showLevelUpPopup("🏆 NEW HIGHSCORE!");
-  }
 
+  console.log('🛑 Game Over! Final score:', finalScore, 'Time taken:', timeTaken);
   playGameOverSound();
   showGameOver(finalScore);
   stopSoundLoop();
-  showHighscore();
-
 }
 
 
-
-//=== VisibiltyCheck? if game page is till in use ==//
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
-     pauseTimer(); 
-    playPauseSound();
-    menuSoundAudio.play();
-    stopSoundLoop();
-    // clear all fast intervals
-    clearInterval(leftFastInterval); leftFastInterval = null;
-    clearInterval(rightFastInterval); rightFastInterval = null;
-    clearInterval(dropFastInterval); dropFastInterval = null;
-
-    document.getElementById('pause').style.display = "none";
-    document.getElementById('pauseOverlay').classList.add('active');
-  }
-  
-});
 
 
 
@@ -870,50 +783,37 @@ function showGameOver(score) {
   gameOver = true;
 }
 
-//=== Restart Logics ==//
 
+window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('restartBtn').addEventListener('click', restartGame);
- 
-  const restartBtn = document.getElementById('inPlayRestart');
+});
 
-  restartBtn.addEventListener('click', () => {
-    // prevent any default behavior (like form submission)
-    restartGame();      // call your game reset logic
-  });
 
 function restartGame() {
-  // reset game variables
   board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
   currentScore = 0;
   gameOver = false;
   currentPiece = newPiece();
+  secondsElapsed = 0;
+  startGameSeconds();
+  isNewHighscore = false;
   spawnIndex = 0;
-  workers.length = 0;
-  let ORIGINAL_WORKER_SPAWN_TIME = [...WORKER_SPAWN_TIMES];
-
-  // reset timer variables
-  elapsedTime = 0;
-  gameSeconds = 0;
-  lastTime = 0;
-  clearInterval(timerInterval);
-  startTimer();
-  loadHighscore();
-
-  // update UI
+  WORKER_SPAWN_TIMES.length = 0;
+  Array.prototype.push.apply(WORKER_SPAWN_TIMES, workerSpawnTimes);
+  workers = []; // Clear all workers on restart
   document.getElementById('score').textContent = "00";
-  document.getElementById('timer').textContent = "00";
   document.getElementById('gameOverOverlay').style.display = 'none';
-  document.getElementById('pauseOverlay').classList.remove('active');
-   document.getElementById('pause').style.display = "block";
-
-  // restart everything
-  isPaused = false;
-  update();       // restart game loop
-  startTimer();   // restart timer
-  if (soundEnabled) playRandomSoundLoop();
-  showLevelUpPopup("Game On 🤜🏽🤛🏼");
+  enableAllButtons();
+  playClockSound();
+  startTimer();
+  update();
+    // Start random game music if sound is enabled
+  if (soundEnabled) {
+    playRandomSoundLoop();
+  }
+  // Show "Game Start" animation popup
+  showLevelUpPopup("Game On🤜🏽🤛🏼");
 }
-
 
 
 // === Master Sound Control ===
@@ -1220,7 +1120,7 @@ window.addEventListener('dblclick', () => {
 
 
 
-//ECONSOLE LOGIC
+//E-CONSOLE LOGIC
 
 const intro = document.getElementById('intro');
 const introImage = document.getElementById('introImage');
@@ -1273,65 +1173,206 @@ setTimeout(() => {
 }, 2700);
 
 
-//===== GAME INITIALIZER ==//
-
-function initGameState() {
-  // Kill old loop if any
-  if (animationId) {
-    cancelAnimationFrame(animationId);
-    animationId = null;
-  }
-
-  board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
-  currentScore = 0;
-  gameOver = false;
-  isPaused = false;
-  lastTime = 0;
-
-  currentPiece = newPiece();
-
-  gameSeconds = 0;
-  workerSpawnQueue = [...WORKER_SPAWN_TIMES];
-  workers = [];
-
-  document.getElementById('score').textContent = "00";
-  document.getElementById('gameOverOverlay').style.display = 'none';
-}
 
 
 
 
 
-//=== START GAME LOGIC ====//
 
+// Start game
 document.getElementById('StartBtn').addEventListener('click', () => {
-  // UI stuff (fine)
+  const toggleBtn = document.getElementById('menuSoundToggle');
+
+  // Hide menu, show game
   document.getElementById('gamePlay').style.display = 'flex'; 
   document.querySelector('.gameBrand').style.display = 'none'; 
   document.getElementById('menuBtn').style.display = 'none';
   document.getElementById('menu').style.display = 'none';
-  menuSoundAudio.pause();
-
-  // 🔥 REAL GAME START
-  initGameState();
-  loadHighscore();
-  startTimer();
+   menuSoundAudio.pause();
+  // Start game logic
+  currentPiece = newPiece();
   update();
-
+  startTimer();
   showLevelUpPopup("Game Start 👍🏽");
+  secondsElapsed = 0;
+  startGameSeconds();
 
+
+  // Stop menu background sound (if playing)
   if (typeof stopSoundLoop === "function") {
     stopSoundLoop();
   }
 
+  // Start random game music if sound is enabled
   if (soundEnabled) {
     playRandomSoundLoop();
   }
 });
-
 
 // Bonus: Save score to localStorage
 window.addEventListener('beforeunload', () => {
   const currentScore = parseInt(document.getElementById('score').textContent) || 0;
   localStorage.setItem('damieTetrisScore', currentScore);
 });
+
+// === High Score System ===
+let highScore = 0;
+let highScoreTime = null;
+let isNewHighscore = false;
+
+function loadHighScore() {
+  const saved = localStorage.getItem('highscore');
+  if (saved) {
+    const data = JSON.parse(saved);
+    highScore = data.score;
+    highScoreTime = data.time;
+  } else {
+    highScore = 0;
+    highScoreTime = null;
+  }
+  updateHighScoreUI();
+}
+
+function updateHighScoreUI() {
+  document.getElementById('highscore').textContent = highScore || '0';
+}
+
+function checkAndUpdateHighScore(finalScore, timeTaken) {
+  if (isNewHighscore) return; // once per game
+
+  const isBetterScore =
+    finalScore > highScore ||
+    (finalScore === highScore && (highScoreTime === null || timeTaken < highScoreTime));
+
+  if (!isBetterScore) return;
+
+  highScore = finalScore;
+  highScoreTime = timeTaken;
+
+  localStorage.setItem(
+    'highscore',
+    JSON.stringify({ score: highScore, time: highScoreTime })
+  );
+
+  isNewHighscore = true;
+  updateHighScoreUI();
+
+  // ✅ Reuse existing popup system
+  showLevelUpPopup("New Highscore 🍾🏆");
+}
+
+function resetHighScore() {
+  localStorage.removeItem('highscore');
+  highScore = 0;
+  highScoreTime = null;
+  isNewHighscore = false;
+  updateHighScoreUI();
+}
+
+// === Game State Reset ===
+function fullGameReset() {
+  // Stop all intervals and animation frames
+  clearInterval(timerInterval); timerInterval = null;
+  clearInterval(gameSecondInterval); gameSecondInterval = null;
+  clearInterval(leftFastInterval); leftFastInterval = null;
+  clearInterval(rightFastInterval); rightFastInterval = null;
+  clearInterval(dropFastInterval); dropFastInterval = null;
+  cancelAnimationFrame(window._rafId); // Use a tracked RAF id if needed
+
+  // Reset all state
+  board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+  currentPiece = newPiece();
+  currentScore = 0;
+  gameOver = false;
+  isPaused = false;
+  secondsElapsed = 0;
+  spawnIndex = 0;
+  WORKER_SPAWN_TIMES.length = 0;
+  Array.prototype.push.apply(WORKER_SPAWN_TIMES, workerSpawnTimes);
+  workers = [];
+  lastTime = 0;
+  dropInterval = 500;
+  currentLevel = "";
+  isNewHighscore = false;
+  document.getElementById('score').textContent = "00";
+  document.getElementById('gameOverOverlay').style.display = 'none';
+  document.getElementById('pauseOverlay').classList.remove('active');
+  enableAllButtons();
+  updateHighScoreUI();
+  updateLevel(0);
+  // Reset timer UI
+  document.getElementById('timer').textContent = '00:00';
+}
+
+// === Restart Button (Pause Overlay) ===
+document.getElementById('pauseRestartBtn').addEventListener('click', () => {
+  fullGameReset();
+  startTimer();
+  startGameSeconds();
+  update();
+  if (soundEnabled) playRandomSoundLoop();
+  showLevelUpPopup("Game On🤜🏽🤛🏼");
+});
+
+// === On Game Start ===
+window.addEventListener('DOMContentLoaded', () => {
+  loadHighScore();
+  document.getElementById('restartBtn').addEventListener('click', () => {
+    fullGameReset();
+    startTimer();
+    startGameSeconds();
+    update();
+    if (soundEnabled) playRandomSoundLoop();
+    showLevelUpPopup("Game On🤜🏽🤛🏼");
+  });
+  document.getElementById('resetHighScoreBtn').addEventListener('click', resetHighScore);
+});
+
+// === Score Update ===
+function score() {
+  let scoreEl = document.getElementById('score');
+  let pop = document.getElementById('pops');
+  let currentScore = parseInt(scoreEl.textContent) || 0;
+  let cleared = clearLines();
+  if (cleared > 0) {
+    let added = 100 * cleared;
+    currentScore += added;
+    playClearedSound();
+    if (pop) pop.classList.toggle('active');
+    showPopText('+' + added + '🔥');
+  } else {
+    currentScore += 10;
+    showPopText('+10');
+  }
+  scoreEl.textContent = currentScore;
+
+  // 🔥 LIVE highscore check and popup
+  if (currentScore > highScore && !isNewHighscore) {
+    isNewHighscore = true;
+    highScore = currentScore;
+    highScoreTime = getElapsedTimeInSeconds();
+    localStorage.setItem(
+      'highscore',
+      JSON.stringify({ score: highScore, time: highScoreTime })
+    );
+    updateHighScoreUI();
+    showLevelUpPopup("New Highscore 🍾🏆");
+  }
+}
+
+// === Game Over Handler ===
+function gameOverHandler() {
+  gameOver = true;
+  disableAllButtons();
+  stopGameSeconds();
+  clearInterval(timerInterval); timerInterval = null;
+  clearInterval(leftFastInterval); leftFastInterval = null;
+  clearInterval(rightFastInterval); rightFastInterval = null;
+  clearInterval(dropFastInterval); dropFastInterval = null;
+  let finalScore = parseInt(document.getElementById('score').textContent) || 0;
+  let timeTaken = getElapsedTimeInSeconds();
+  checkAndUpdateHighScore(finalScore, timeTaken);
+  playGameOverSound();
+  showGameOver(finalScore);
+  stopSoundLoop();
+}
